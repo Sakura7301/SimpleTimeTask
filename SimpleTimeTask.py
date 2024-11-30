@@ -18,8 +18,6 @@ from channel.chat_message import ChatMessage
 from channel.wechat.wechat_channel import WechatChannel
 
 
-
-
 @plugins.register(
     name="SimpleTimeTask",
     desire_priority=100,
@@ -522,9 +520,6 @@ class SimpleTimeTask(Plugin):
             elif len(command_args) >= 4 and command_args[1] in ["今天", "明天", "工作日", "每天"]:
                 # 添加任务
                 reply_str = self.add_task(command_args, user_id, user_name, user_group_name)
-            else:
-                # 无效输入
-                reply_str = "无效指令，请检查输入格式。"
 
             # 创建回复对象
             reply = Reply()

@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 ## 赞助
 开发不易，我的朋友，如果你想请我喝杯咖啡的话(笑)
 
-![image](https://github.com/user-attachments/assets/da864189-3d42-4949-9ad7-b74c0dcd96fd)
+<img src="https://github.com/user-attachments/assets/db273642-1787-4195-af52-7b14c8733405" alt="image" width="300"/> 
 
 ## 许可
 此项目采用 Apache License 版本 2.0，详细信息请查看 [LICENSE](LICENSE)。

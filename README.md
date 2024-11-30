@@ -3,7 +3,7 @@
 # SimpleTimeTask 插件
 
 ## 简介
-**SimpleTimeTask** 是一个基于 chatgpt-on-wechat 的插件，用于触发定时任务。
+**SimpleTimeTask** 是一个基于 chatgpt-on-wechat 的插件，用于触发定时任务，感谢[timetask](https://github.com/haikerapples/timetask)项目提供的帮助，部分实现参考于此。
 
 ## 安装
 - 方法一：
@@ -112,8 +112,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 ## 赞助
 开发不易，我的朋友，如果你想请我喝杯咖啡的话(笑)
 
-<img src="https://github.com/user-attachments/assets/db273642-1787-4195-af52-7b14c8733405" alt="image" width="300"/> 
-
+![image](https://github.com/user-attachments/assets/da864189-3d42-4949-9ad7-b74c0dcd96fd)
 
 ## 许可
 此项目采用 Apache License 版本 2.0，详细信息请查看 [LICENSE](LICENSE)。

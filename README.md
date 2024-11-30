@@ -1,5 +1,3 @@
----
-
 # SimpleTimeTask 插件
 
 ## 简介
@@ -116,5 +114,3 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ## 许可
 此项目采用 Apache License 版本 2.0，详细信息请查看 [LICENSE](LICENSE)。
-
----

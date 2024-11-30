@@ -120,9 +120,19 @@ class SimpleTimeTask(Plugin):
 
     def add_task(self, command_args, user_id, user_name, user_group_name):
         """ 添加任务 """
+        # 初始化返回内容
+        reply_str = None
+        # 获取参数
         frequency = command_args[1]
         time_value = command_args[2]
         content = ' '.join(command_args[3:])
+
+        # 检查频率和时间是否为空
+        if len(frequency) < 1 or len(time_value) < 1 or len(content) < 1:
+            reply_str = f"[SimpleTimeTask] 任务格式错误: {command_args}\n请使用 '/time 频率 时间 内容' 的格式。"
+            logger.warning(reply_str)
+            return reply_str
+
         logger.debug(f"[SimpleTimeTask] {frequency} {time_value} {content}")
 
         # 解析目标群
@@ -202,7 +212,7 @@ class SimpleTimeTask(Plugin):
                 # 检查任务列表是否为空
                 if not self.tasks:
                     logger.warning(f"[SimpleTimeTask] No tasks to cancel.")
-                    return "没有可取消的任务。"
+                    return "[SimpleTimeTask] 没有可取消的任务。"
 
                 deleted = False
                 new_tasks = []
@@ -230,7 +240,7 @@ class SimpleTimeTask(Plugin):
 
             except Exception as e:
                 logger.error(f"[SimpleTimeTask] Error cancelling task: {e}")
-                return "取消任务时发生错误，请稍后重试。"
+                return "[SimpleTimeTask] 取消任务时发生错误，请稍后重试。"
 
     def remove_task_from_db(self, task_id):
         """ 从数据库中删除任务 """
@@ -521,23 +531,31 @@ class SimpleTimeTask(Plugin):
 
             # 解析指令
             command_args = command.split(' ')
-            if len(command_args) == 2 and command_args[1] == '任务列表':
+            if command_args[1] == '任务列表':
                 # 获取任务列表
                 reply_str = self.show_task_list()
-            elif len(command_args) == 3 and command_args[1] == '取消任务':
+            elif command_args[1] == '取消任务':
                 # 取消任务
-                reply_str = self.cancel_task(command_args[2])
-            elif len(command_args) >= 4 and command_args[1] in ["今天", "明天", "工作日", "每天"]:
+                if len(command_args) != 3:
+                    reply_str = "[SimpleTimeTask] 请输入有效任务ID"
+                else:
+                    reply_str = self.cancel_task(command_args[2])
+            elif command_args[1] in ["今天", "明天", "工作日", "每天"]:
                 # 添加任务
-                reply_str = self.add_task(command_args, user_id, user_name, user_group_name)
+                if len(command_args) < 4:
+                    reply_str = f"[SimpleTimeTask] 任务格式错误: {command_args}\n请使用 '/time 频率 时间 内容' 的格式。"
+                    logger.warning(reply_str)
+                else:
+                    reply_str = self.add_task(command_args, user_id, user_name, user_group_name)
 
-            # 创建回复对象
-            reply = Reply()
-            reply.type = ReplyType.TEXT
-            reply.content = reply_str
-            e_context['reply'] = reply
-            e_context.action = EventAction.BREAK_PASS
-            return
+            if reply_str is not None:
+                # 创建回复对象
+                reply = Reply()
+                reply.type = ReplyType.TEXT
+                reply.content = reply_str
+                e_context['reply'] = reply
+                e_context.action = EventAction.BREAK_PASS
+                return
 
     def get_help_text(self, **kwargs):
         """获取帮助文本"""

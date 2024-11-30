@@ -66,7 +66,7 @@
 
 插件会自动创建一个 SQLite 数据库，用于持久化保存任务信息。数据库文件位于 `plugins/SimpleTimeTask/simple_time_task.db`。用户可以根据需要手动查看或修改数据库内容。
 
-### 数据库表结构
+### 数据表结构
 
 ```
 CREATE TABLE IF NOT EXISTS tasks (
@@ -78,7 +78,6 @@ CREATE TABLE IF NOT EXISTS tasks (
    user_id TEXT,
    user_name TEXT,
    user_group_name TEXT,
-   au TEXT,
    group_title TEXT,
    is_processed INTEGER DEFAULT 0
 )

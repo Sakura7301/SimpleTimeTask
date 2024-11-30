@@ -5,6 +5,7 @@ import time
 import random
 import plugins
 import sqlite3
+import datetime
 import threading
 from plugins import *
 from lib import itchat
@@ -72,7 +73,6 @@ class SimpleTimeTask(Plugin):
                     user_id TEXT,
                     user_name TEXT,
                     user_group_name TEXT,
-                    au TEXT,
                     group_title TEXT,
                     is_processed INTEGER DEFAULT 0
                 )
@@ -123,6 +123,7 @@ class SimpleTimeTask(Plugin):
         frequency = command_args[1]
         time_value = command_args[2]
         content = ' '.join(command_args[3:])
+        logger.debug(f"[SimpleTimeTask] {frequency} {time_value} {content}")
 
         # 解析目标群
         group_title = None
@@ -144,7 +145,6 @@ class SimpleTimeTask(Plugin):
             frequency = "once"
         elif frequency == "工作日":
             frequency = "work_day"
-
         elif frequency == "每天":
             frequency = "every_day"
 
@@ -155,7 +155,7 @@ class SimpleTimeTask(Plugin):
             # 将新任务更新到数据库
             self.update_task_in_db(task_id, time_value, frequency, content, self.GROUP_TASK if group_title else self.USER_TASK, user_id, user_name, user_group_name, group_title, self.UNDISPOSED)
             # 格式化回复内容
-            reply_str = f"[SimpleTimeTask] 😸任务已添加: \n[{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if group_title else ''}"
+            reply_str = f"[SimpleTimeTask] 😸 任务已添加: \n\n[{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if group_title else ''}"
         else:
             reply_str = "[SimpleTimeTask] 添加任务失败，时间格式不正确或已过期."
 
@@ -184,13 +184,14 @@ class SimpleTimeTask(Plugin):
         tasks_list = ""
         # 遍历任务列表
         if self.tasks:
-            tasks_list += "[SimpleTimeTask] 任务列表:\n"
-            for task in self.tasks:
-                tasks_list += f"💼[{task[0]}] {task[2]} {task[1]} {task[3]} {'group[' + task[6] + ']' if task[6] else ''}\n"
+            tasks_list += "[SimpleTimeTask] 😸 任务列表:\n\n"
+            for task in self.tasks[:]:
+                task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed = task
+                tasks_list += f"💼[{user_name}|{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if target_type else ''}\n"
         else:
             tasks_list = "[SimpleTimeTask] 当前没有任何任务"
 
-        logger.info(f"[SimpleTimeTask] {tasks_list}")
+        logger.debug(f"[SimpleTimeTask] {tasks_list}")
         return tasks_list
 
     def cancel_task(self, task_id):
@@ -222,7 +223,7 @@ class SimpleTimeTask(Plugin):
                 # 更新数据库
                 if deleted:
                     self.remove_task_from_db(task_id)
-                    return f"[SimpleTimeTask] 任务 [{task_id}] 已取消."
+                    return f"[SimpleTimeTask] 😸 任务 [{task_id}] 已取消。"
                 else:
                     logger.warning(f"[SimpleTimeTask] Task ID [{task_id}] not found for cancellation.")
                     return f"[SimpleTimeTask] 未找到任务 [{task_id}]."
@@ -239,6 +240,11 @@ class SimpleTimeTask(Plugin):
             cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
             conn.commit()
             logger.info(f"[SimpleTimeTask] Task removed from DB: {task_id}")
+
+    def is_weekday(self):
+        today = datetime.datetime.now()
+        # weekday() 返回值：0 = 星期一, 1 = 星期二, ..., 6 = 星期日
+        return today.weekday() < 5
 
     def check_and_trigger_tasks(self):
         """ 定时检查和触发任务 """
@@ -263,15 +269,22 @@ class SimpleTimeTask(Plugin):
                         if frequency == "once":
                             # 对于 "once"，使用完整的年-月-日-时-分
                             task_date, task_time = time_value.split(' ')
-                            if today_date != task_date:
+                            if task_date != today_date:
                                 # 只触发在当天
                                 continue
                             if task_time != now:
                                 # 只触发在当前时间
                                 continue
-
-                        elif frequency in ["work_day", "every_day"]:
-                            # 对于 "work_day" 和 "every_day"，只使用时-分
+                        elif frequency == "work_day":
+                            # 对于 "work_day"，只在工作日触发，且只使用时-分
+                            if not self.is_weekday():
+                                # 不是工作日，跳过
+                                continue
+                            # 若时间不符合或已处理，则跳过
+                            if task_time!= now or is_processed:
+                                continue
+                        elif frequency == "every_day":
+                            # 对于 "every_day"，每天触发，且只使用时-分
                             task_time = time_value
                             # 若时间不符合或已处理，则跳过
                             if task_time != now or is_processed:
@@ -328,7 +341,8 @@ class SimpleTimeTask(Plugin):
         """ 验证时间和频率 """
         if frequency not in ["once", "work_day", "every_day"]:
             return False
-
+        # 初始化返回值
+        ret = True
         # 获取当前时间
         current_time = time.strftime("%H:%M")
 
@@ -336,19 +350,15 @@ class SimpleTimeTask(Plugin):
             # 如果是一次性任务，检查时间格式
             if time_value < f"{time.strftime('%Y-%m-%d')} {current_time}":
                 # 今天的时间已过期
-                return False
-
+                ret = False
         elif frequency == "work_day":
             # 工作日时间检查
-            if time_value < current_time:
-                # 确保时间是有效的且没有过期
-                return False
-
+            ret = True
         elif frequency == "every_day":
             # 每天的任务可以在任何时间生效
-            return True
+            ret = True
 
-        return True
+        return ret
 
     def trigger_task(self, content, user_id, user_name, target_type, user_group_name, group_title):
         """ 触发任务的实际逻辑 """

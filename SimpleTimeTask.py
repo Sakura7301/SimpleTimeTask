@@ -17,6 +17,7 @@ from bridge.reply import Reply, ReplyType
 from bridge.context import ContextType, Context
 from channel.chat_message import ChatMessage
 from channel.wechat.wechat_channel import WechatChannel
+from plugins.SimpleTimeTask.Task import Task
 
 
 @plugins.register(
@@ -33,17 +34,13 @@ class SimpleTimeTask(Plugin):
         try:
             self.config = super().load_config()
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
-            # 定义全局宏
-            self.USER_TASK = 0
-            self.GROUP_TASK = 1
-            self.UNDISPOSED = 0
-            self.PROCESSED = 1
             # 定义数据库路径
             self.DB_FILE_PATH = "plugins/SimpleTimeTask/simple_time_task.db"
-            # 初始化数据库并加载任务到内存
-            self.tasks = self.init_db_and_load_tasks()
             # 创建数据库锁
             self.db_lock = threading.Lock()
+            # 初始化数据库并加载任务到内存
+            self.tasks = []
+            self.init_db_and_load_tasks()
             # 防抖动字典
             self.user_last_processed_time = {}
             # 启动任务检查线程
@@ -59,8 +56,7 @@ class SimpleTimeTask(Plugin):
 
     def init_db_and_load_tasks(self):
         """ 初始化数据库，创建任务表并加载现有任务 """
-        tasks = []
-        with sqlite3.connect(self.DB_FILE_PATH) as conn:
+        with self.db_lock, sqlite3.connect(self.DB_FILE_PATH) as conn:
             cursor = conn.cursor()
             # 创建数据表（如果不存在），注意添加 is_processed 字段
             cursor.execute('''
@@ -77,16 +73,30 @@ class SimpleTimeTask(Plugin):
                     is_processed INTEGER DEFAULT 0
                 )
             ''')
-            conn.commit()
-
             # 从数据库中加载当前的任务
             cursor.execute('SELECT * FROM tasks')
-            # 读取所有任务
-            tasks = cursor.fetchall()
-            logger.info(f"[SimpleTimeTask] Loaded tasks from database: {tasks}")
+            # 读取所有任务行
+            rows = cursor.fetchall()
+            logger.info(f"[SimpleTimeTask] Loaded tasks from database: {rows}")
 
-        # 返回加载的任务列表，注意索引需与表的字段数量保持一致。
-        return tasks
+            # 创建 Task 对象并添加到 self.tasks 列表
+            for row in rows:
+                task = Task(
+                    task_id=row[0],
+                    time_value=row[1],
+                    frequency=row[2],
+                    content=row[3],
+                    target_type=row[4],
+                    user_id=row[5],
+                    user_name=row[6],
+                    user_group_name=row[7],
+                    group_title=row[8],
+                    is_processed=row[9]
+                )
+                # 添加 Task 实例到 self.tasks 列表
+                self.tasks.append(task)
+
+        logger.info(f"[SimpleTimeTask] Initialized tasks: {self.tasks}")
 
     def find_user_name_by_user_id(self, msg, user_id):
         """查找指定 UserName 的昵称"""
@@ -122,93 +132,94 @@ class SimpleTimeTask(Plugin):
         """ 添加任务 """
         # 初始化返回内容
         reply_str = None
-        # 获取参数
-        frequency = command_args[1]
-        time_value = command_args[2]
-        content = ' '.join(command_args[3:])
+        target_type = 0
+        with self.db_lock:
+            # 获取参数
+            frequency = command_args[1]
+            time_value = command_args[2]
+            content = ' '.join(command_args[3:])
 
-        # 检查频率和时间是否为空
-        if len(frequency) < 1 or len(time_value) < 1 or len(content) < 1:
-            reply_str = f"[SimpleTimeTask] 任务格式错误: {command_args}\n请使用 '/time 频率 时间 内容' 的格式。"
-            logger.warning(reply_str)
-            return reply_str
+            # 检查频率和时间是否为空
+            if len(frequency) < 1 or len(time_value) < 1 or len(content) < 1:
+                reply_str = f"[SimpleTimeTask] 任务格式错误: {command_args}\n请使用 '/time 频率 时间 内容' 的格式。"
+                logger.warning(reply_str)
+                return reply_str
 
-        logger.debug(f"[SimpleTimeTask] {frequency} {time_value} {content}")
+            logger.debug(f"[SimpleTimeTask] {frequency} {time_value} {content}")
 
-        # 解析目标群
-        group_title = None
-        if command_args[-1].startswith('group['):
-            # 获取群聊名称
-            group_title = command_args[-1][6:-1]
-            # 获取任务内容
-            content = ' '.join(command_args[3:-1])
+            # 解析目标群
+            group_title = None
+            if command_args[-1].startswith('group['):
+                # 获取群聊名称
+                group_title = command_args[-1][6:-1]
+                # 获取任务内容
+                content = ' '.join(command_args[3:-1])
 
-        # 生成任务ID
-        task_id = self.generate_unique_id()
+            # 生成任务ID
+            task_id = self.generate_unique_id()
 
-        # 处理时间字符串
-        if frequency in ["今天", "明天"]:
-            # 为一次性任务设置具体时分
-            date_str = time.strftime("%Y-%m-%d") if frequency == "今天" else time.strftime("%Y-%m-%d", time.localtime(time.time() + 86400))
-            # 格式化为 年-月-日 时:分
-            time_value = f"{date_str} {time_value}"
-            frequency = "once"
-        elif frequency == "工作日":
-            frequency = "work_day"
-        elif frequency == "每天":
-            frequency = "every_day"
+            # 处理时间字符串
+            if frequency in ["今天", "明天"]:
+                # 为一次性任务设置具体时分
+                date_str = time.strftime("%Y-%m-%d") if frequency == "今天" else time.strftime("%Y-%m-%d", time.localtime(time.time() + 86400))
+                # 格式化为 年-月-日 时:分
+                time_value = f"{date_str} {time_value}"
+                frequency = "once"
+            elif frequency == "工作日":
+                frequency = "work_day"
+            elif frequency == "每天":
+                frequency = "every_day"
 
-        # 检查任务时间的有效性
-        if self.validate_time(frequency, time_value):
-            # 将新任务添加到内存中，标记未处理状态（默认为False）
-            self.tasks.append((task_id, time_value, frequency, content, self.GROUP_TASK if group_title else self.USER_TASK, user_id, user_name, user_group_name, group_title, self.UNDISPOSED))
-            # 将新任务更新到数据库
-            self.update_task_in_db(task_id, time_value, frequency, content, self.GROUP_TASK if group_title else self.USER_TASK, user_id, user_name, user_group_name, group_title, self.UNDISPOSED)
-            # 格式化回复内容
-            reply_str = f"[SimpleTimeTask] 😸 任务已添加: \n\n[{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if group_title else ''}"
-        else:
-            reply_str = "[SimpleTimeTask] 添加任务失败，时间格式不正确或已过期."
+            # 检查任务时间的有效性
+            if self.validate_time(frequency, time_value):
+                if group_title:
+                    target_type = 1
+                # 创建任务
+                new_task = Task(task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, 0)
+                # 将新任务添加到内存中
+                self.tasks.append(new_task)
+                # 将新任务更新到数据库
+                self.update_task_in_db(new_task)
+                # 格式化回复内容
+                reply_str = f"[SimpleTimeTask] 😸 任务已添加: \n\n[{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if group_title else ''}"
+            else:
+                reply_str = "[SimpleTimeTask] 添加任务失败，时间格式不正确或已过期."
 
-        # 打印任务列表
-        logger.info(f"[SimpleTimeTask] 任务列表: {self.tasks}")
+            # 打印任务列表
+            logger.debug(f"[SimpleTimeTask] 任务列表: {self.tasks}")
 
         return reply_str
 
-    def update_task_in_db(self, task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed):
+    def update_task_in_db(self, task: Task):
         """ 更新任务到数据库 """
-        # 使用锁保证线程安全
-        with self.db_lock:
-            # 更新任务到数据库
-            with sqlite3.connect(self.DB_FILE_PATH) as conn:
-                cursor = conn.cursor()
-                # is_processed默认值设为0（未处理）
-                cursor.execute('''
-                    INSERT INTO tasks (id, time, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed))
-                # 提交更改
-                conn.commit()
-                logger.info(f"[SimpleTimeTask] Task added to DB: {task_id}")
+        # 由于我们该方法是对任务的插入，因此可以简化锁的使用
+        with sqlite3.connect(self.DB_FILE_PATH) as conn:
+            cursor = conn.cursor()
+            # is_processed 默认值设为 0（未处理）
+            cursor.execute('''
+                INSERT INTO tasks (id, time, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (task.task_id, task.time_value, task.frequency, task.content,
+                task.target_type, task.user_id, task.user_name,
+                task.user_group_name, task.group_title, task.is_processed))
+            # 提交更改
+            conn.commit()
+            logger.info(f"[SimpleTimeTask] Task added to DB: {task.task_id}")
 
     def show_task_list(self):
         """ 显示所有任务 """
-        tasks_list = ""
         # 遍历任务列表
-        if self.tasks:
-            tasks_list += "[SimpleTimeTask] 😸 任务列表:\n\n"
-            for task in self.tasks[:]:
-                task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed = task
-                tasks_list += f"💼[{user_name}|{task_id}] {frequency} {time_value} {content} {'group[' + group_title + ']' if target_type else ''}\n"
-        else:
-            tasks_list = "[SimpleTimeTask] 当前没有任何任务"
-
-        logger.debug(f"[SimpleTimeTask] {tasks_list}")
-        return tasks_list
+        with self.db_lock:
+            tasks_list = "[SimpleTimeTask] 😸 任务列表:\n\n"
+            for task in self.tasks:
+                tasks_list += f"💼[{task.user_name}|{task.task_id}] {task.frequency} {task.time_value} {task.content} {'group[' + task.group_title + ']' if task.target_type else ''}\n"
+            return tasks_list
+        tasks_list = ""
 
     def cancel_task(self, task_id):
         """ 取消任务 """
-        # 确保线程安全
-        with self.db_lock:
-            try:
+        try:
+            with self.db_lock:
                 # 检查任务列表是否为空
                 if not self.tasks:
                     logger.warning(f"[SimpleTimeTask] No tasks to cancel.")
@@ -219,7 +230,7 @@ class SimpleTimeTask(Plugin):
 
                 # 遍历当前任务，决定是否删除任务
                 for task in self.tasks:
-                    if task[0] == task_id:
+                    if task.task_id == task_id:
                         # 找到并标记为删除
                         deleted = True
                         logger.info(f"[SimpleTimeTask] Task cancelled: {task_id}")
@@ -238,9 +249,9 @@ class SimpleTimeTask(Plugin):
                     logger.warning(f"[SimpleTimeTask] Task ID [{task_id}] not found for cancellation.")
                     return f"[SimpleTimeTask] 未找到任务 [{task_id}]."
 
-            except Exception as e:
-                logger.error(f"[SimpleTimeTask] Error cancelling task: {e}")
-                return "[SimpleTimeTask] 取消任务时发生错误，请稍后重试。"
+        except Exception as e:
+            logger.error(f"[SimpleTimeTask] Error cancelling task: {e}")
+            return "[SimpleTimeTask] 取消任务时发生错误，请稍后重试。"
 
     def remove_task_from_db(self, task_id):
         """ 从数据库中删除任务 """
@@ -268,84 +279,95 @@ class SimpleTimeTask(Plugin):
             if now == "00:00":
                 self.reset_processed_status()
 
-            # 确保线程安全
-            with self.db_lock:
-                # 遍历副本以便在列表修改时不出错
-                for task in self.tasks[:]:
-                    task_id, time_value, frequency, content, target_type, user_id, user_name, user_group_name, group_title, is_processed = task
+            # 遍历副本以便在列表修改时不出错
+            for task in self.tasks:
+                # 处理时间格式
+                try:
+                    if task.frequency == "once":
+                        # 对于 "once"，使用完整的年-月-日-时-分
+                        task_date, task_time = task.time_value.split(' ')
+                        if task_date != today_date:
+                            # 只触发在当天
+                            continue
+                        if task_time != now:
+                            # 只触发在当前时间
+                            continue
+                    elif task.frequency == "work_day":
+                        # 对于 "work_day"，只在工作日触发，且只使用时-分
+                        if not self.is_weekday():
+                            # 不是工作日，跳过
+                            continue
+                        task_time = task.time_value
+                        # 若时间不符合或已处理，则跳过
+                        if task_time!= now or task.is_processed == 1:
+                            continue
+                    elif task.frequency == "every_day":
+                        # 对于 "every_day"，每天触发，且只使用时-分
+                        task_time = task.time_value
+                        # 若时间不符合或已处理，则跳过
+                        if task_time != now or task.is_processed == 1:
+                            continue
 
-                    # 处理时间格式
+                    # 触发任务
+                    self.run_task_in_thread(task)
+
+                    # 任务触发后处理
+                    if task.frequency == "once":
+                        # 从内存中移除
+                        self.tasks.remove(task)
+                        # 从数据库中删除对应的条目
+                        self.remove_task_from_db(task.task_id)
+                    else:
+                        # 将 is_processed 设置为 1
+                        task.is_processed =  1
+                        # 更新数据库中的状态
+                        self.update_processed_status_in_db(task.task_id, 1)
+
+                except ValueError as e:
+                    logger.error(f"[SimpleTimeTask] Time format error for task ID {task.task_id}: {e}")
+                    # 删除报错的任务
                     try:
-                        if frequency == "once":
-                            # 对于 "once"，使用完整的年-月-日-时-分
-                            task_date, task_time = time_value.split(' ')
-                            if task_date != today_date:
-                                # 只触发在当天
-                                continue
-                            if task_time != now:
-                                # 只触发在当前时间
-                                continue
-                        elif frequency == "work_day":
-                            # 对于 "work_day"，只在工作日触发，且只使用时-分
-                            if not self.is_weekday():
-                                # 不是工作日，跳过
-                                continue
-                            # 若时间不符合或已处理，则跳过
-                            if task_time!= now or is_processed:
-                                continue
-                        elif frequency == "every_day":
-                            # 对于 "every_day"，每天触发，且只使用时-分
-                            task_time = time_value
-                            # 若时间不符合或已处理，则跳过
-                            if task_time != now or is_processed:
-                                continue
-
-                        # 如果 reach here, 当前时间与任务时间一致且任务未被处理，则触发任务
-                        self.trigger_task(content, user_id, user_name, target_type, user_group_name, group_title)
-
-                        # 任务触发后处理
-                        if frequency == "once":
-                            # 从内存中移除
-                            self.tasks.remove(task)
-                            # 从数据库中删除对应的任务
-                            self.remove_task_from_db(task_id)
-                        else:
-                            # 标记为已处理
-                            index = self.tasks.index(task)
-                            # 将 is_processed 设置为 True
-                            self.tasks[index] = (*self.tasks[index][:8], self.PROCESSED)
-
-                    except ValueError as e:
-                        logger.error(f"[SimpleTimeTask] Time format error for task ID {task_id}: {e}")
+                        self.tasks.remove(task)
+                        self.remove_task_from_db(task.task_id)
                     except Exception as e:
-                        logger.error(f"[SimpleTimeTask] An unexpected error occurred for task ID {task_id}: {e}")
+                        logger.error(f"[SimpleTimeTask] to delete this task {task.task_id}: {e}")
+                except Exception as e:
+                    logger.error(f"[SimpleTimeTask] An unexpected error occurred for task ID {task.task_id}: {e}")
+                    # 删除报错的任务
+                    try:
+                        self.tasks.remove(task)
+                        self.remove_task_from_db(task.task_id)
+                    except Exception as e:
+                        logger.error(f"[SimpleTimeTask] to delete this task {task.task_id}: {e}")
 
             time.sleep(5)  # 5秒检查一次
 
     def reset_processed_status(self):
         """ 重置所有任务的已处理状态 """
         with self.db_lock:
-            for i in range(len(self.tasks)):
+            for task in self.tasks:
                 # 如果 is_processed 为 True
-                if self.tasks[i][8] == self.PROCESSED:
-                    task_id = self.tasks[i][0]
+                if task.is_processed == 1:
                     # 重置为 False
-                    self.tasks[i] = (*self.tasks[i][:8], self.UNDISPOSED)
+                    task.is_processed = 0
                     # 更新数据库中的状态
-                    self.update_processed_status_in_db(task_id, self.UNDISPOSED)
+                    with sqlite3.connect(self.DB_FILE_PATH) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('UPDATE tasks SET is_processed = ? WHERE id = ?', (0, task.task_id))
+                        conn.commit()
+                        logger.info(f"[SimpleTimeTask] Task status updated in DB: {task.task_id} to {0}")
 
     def update_processed_status_in_db(self, task_id, is_processed):
         """ 更新任务的处理状态到数据库 """
-        with self.db_lock:
-            with sqlite3.connect(self.DB_FILE_PATH) as conn:
-                cursor = conn.cursor()
-                cursor.execute('UPDATE tasks SET is_processed = ? WHERE id = ?', (is_processed, task_id))
-                conn.commit()
-                logger.info(f"[SimpleTimeTask] Task status updated in DB: {task_id} to {is_processed}")
+        with sqlite3.connect(self.DB_FILE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE tasks SET is_processed = ? WHERE id = ?', (is_processed, task_id))
+            conn.commit()
+            logger.info(f"[SimpleTimeTask] Task status updated in DB: {task_id} to {is_processed}")
 
     def generate_unique_id(self):
         """ 生成唯一任务ID """
-        return ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=10))
+        return ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=10))
 
     def validate_time(self, frequency, time_value):
         """ 验证时间和频率 """
@@ -370,85 +392,74 @@ class SimpleTimeTask(Plugin):
 
         return ret
 
-    def trigger_task(self, content, user_id, user_name, target_type, user_group_name, group_title):
+    def trigger_task(self, task: Task):
         """ 触发任务的实际逻辑 """
         try:
+            # 初始化变量
+            content = task.content
             receiver = None
             is_group = False
             is_group_str = "用户消息"
-            if target_type == self.GROUP_TASK:
+            if task.target_type == 1:
                 is_group = True
-                receiver = self.get_group_id(group_title)
+                receiver = self.get_group_id(task.group_title)
                 is_group_str = "群组消息"
             else:
-                receiver = user_id
+                receiver = task.user_id
 
-            logger.info(f"[SimpleTimeTask] 触发[{user_name}]的{is_group_str}: [{content}] to {receiver}")
+            logger.info(f"[SimpleTimeTask] 触发[{task.user_name}]的{is_group_str}: [{content}] to {receiver}")
+
             # 构造消息
-            orgin_string = f"id=0, create_time=0, ctype=TEXT, content=/time 每天 17:55 text, from_user_id=@, from_user_nickname=用户昵称, to_user_id==, to_user_nickname=, other_user_id=@123, other_user_nickname=用户昵称, is_group=False, is_at=False, actual_user_id=None, actual_user_nickname=None, at_list=None"
-            # 使用正则表达式匹配键值对
+            orgin_string = "id=0, create_time=0, ctype=TEXT, content=/time 每天 17:55 text, from_user_id=@, from_user_nickname=用户昵称, to_user_id==, to_user_nickname=, other_user_id=@123, other_user_nickname=用户昵称, is_group=False, is_at=False, actual_user_id=None, actual_user_nickname=None, at_list=None"
             pattern = r'(\w+)\s*=\s*([^,]+)'
             matches = re.findall(pattern, orgin_string)
-            # 创建字典
             content_dict = {match[0]: match[1] for match in matches}
             content_dict["content"] = content
             content_dict["receiver"] = receiver
             content_dict["session_id"] = receiver
             content_dict["isgroup"] = is_group
-            content_dict["ActualUserName"] = user_name
-            content_dict["from_user_nickname"] = user_name
-            content_dict["from_user_id"] = user_id
+            content_dict["ActualUserName"] = task.user_name
+            content_dict["from_user_nickname"] = task.user_name
+            content_dict["from_user_id"] = task.user_id
             content_dict["User"] = {
-                'MemberList': [
-                    {
-                        'UserName': user_id,
-                        'NickName': user_name,
-                    }
-                ]
+                'MemberList': [{'UserName': task.user_id, 'NickName': task.user_name}]
             }
+
             # 构建上下文
-            msg : ChatMessage = ChatMessage(content_dict)
-            #信息映射
+            msg: ChatMessage = ChatMessage(content_dict)
             for key, value in content_dict.items():
                 if hasattr(msg, key):
                     setattr(msg, key, value)
-            #处理message的is_group
             msg.is_group = is_group
             content_dict["msg"] = msg
             context = Context(ContextType.TEXT, content, content_dict)
+
+            # 以下部分保持不变
             if "GPT" in content:
-                # 构造GPT消息回复
                 content = content.replace("GPT", "")
-                reply : Reply = Bridge().fetch_reply_content(content, context)
+                reply: Reply = Bridge().fetch_reply_content(content, context)
                 reply_text = reply.content
                 replyType = reply.type
             else:
                 e_context = None
                 channel = WechatChannel()
                 channel.channel_type = "wx"
-                #替换源消息中的指令
                 content_dict["content"] = content
                 context.__setitem__("content", content)
                 logger.info(f"[SimpleTimeTask] content: {content}")
                 try:
-                    #检测插件是否会消费该消息
                     e_context = PluginManager().emit_event(
-                        EventContext(
-                            Event.ON_HANDLE_CONTEXT,
-                            {"channel": channel, "context": context, "reply": Reply()},
-                        )
+                        EventContext(Event.ON_HANDLE_CONTEXT, {"channel": channel, "context": context, "reply": Reply()})
                     )
-                except  Exception as e:
+                except Exception as e:
                     logger.info(f"路由插件异常！将使用原消息回复。错误信息：{e}")
-                # 检查是否是插件消息
+
                 if e_context:
-                    #插件消息
                     reply = e_context["reply"]
                     if reply and reply.type:
                         reply_text = reply.content
                         replyType = reply.type
                 else:
-                    # 普通消息
                     reply_text = f"[SimpleTimeTask]\n--定时提醒任务--\n{content}"
                     replyType = ReplyType.TEXT
 
@@ -456,8 +467,30 @@ class SimpleTimeTask(Plugin):
             reply.type = replyType
             reply.content = reply_text
             self.replay_use_custom(reply, context)
+
         except Exception as e:
             logger.error(f"[SimpleTimeTask] 发送消息失败: {e}")
+
+    def run_task_in_thread(self, task: Task):
+        """ 在新线程中运行任务 """
+        logger.info(f"[SimpleTimeTask] 开始运行任务 {task.task_id}")
+        # 控制线程的事件
+        task_thread = threading.Thread(target=self.run_with_timeout, args=(task,))
+        task_thread.start()
+        # 设置超时为60秒
+        task_thread.join(timeout=60)
+
+        if task_thread.is_alive():
+            logger.warning(f"[SimpleTimeTask] 任务 {task.task_id} 超时结束")
+            # 结束线程
+            task_thread.join()
+
+    def run_with_timeout(self, task: Task):
+        """ 运行任务并捕获异常 """
+        try:
+            self.trigger_task(task)
+        except Exception as e:
+            logger.error(f"[SimpleTimeTask] 运行任务时发生异常: {e}")
 
     def replay_use_custom(self, reply, context : Context, retry_cnt=0):
         try:

@@ -56,47 +56,70 @@ class SimpleTimeTask(Plugin):
 
     def init_db_and_load_tasks(self):
         """ 初始化数据库，创建任务表并加载现有任务 """
-        with self.db_lock, sqlite3.connect(self.DB_FILE_PATH) as conn:
-            cursor = conn.cursor()
-            # 创建数据表（如果不存在），注意添加 is_processed 字段
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY,
-                    time TEXT NOT NULL,
-                    frequency TEXT CHECK(frequency IN ('once', 'work_day', 'every_day')),
-                    content TEXT NOT NULL,
-                    target_type INTEGER DEFAULT 0,
-                    user_id TEXT,
-                    user_name TEXT,
-                    user_group_name TEXT,
-                    group_title TEXT,
-                    is_processed INTEGER DEFAULT 0
-                )
-            ''')
-            # 从数据库中加载当前的任务
-            cursor.execute('SELECT * FROM tasks')
-            # 读取所有任务行
-            rows = cursor.fetchall()
-            logger.info(f"[SimpleTimeTask] Loaded tasks from database: {rows}")
+        with self.db_lock:
+            # 创建数据库连接
+            with sqlite3.connect(self.DB_FILE_PATH) as conn:
+                cursor = conn.cursor()
 
-            # 创建 Task 对象并添加到 self.tasks 列表
-            for row in rows:
-                task = Task(
-                    task_id=row[0],
-                    time_value=row[1],
-                    frequency=row[2],
-                    content=row[3],
-                    target_type=row[4],
-                    user_id=row[5],
-                    user_name=row[6],
-                    user_group_name=row[7],
-                    group_title=row[8],
-                    is_processed=row[9]
-                )
-                # 添加 Task 实例到 self.tasks 列表
-                self.tasks.append(task)
+                # 检查表是否存在并获取元数据
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks';")
+                table_exists = cursor.fetchone() is not None
 
-        logger.info(f"[SimpleTimeTask] Initialized tasks: {self.tasks}")
+                if table_exists:
+                    # 表存在，检查字段兼容性
+                    cursor.execute("PRAGMA table_info(tasks);")
+                    columns = cursor.fetchall()
+                    column_names = [column[1] for column in columns]  # 提取字段名
+
+                    expected_columns = [
+                        'id', 'time', 'frequency', 'content',
+                        'target_type', 'user_id', 'user_name',
+                        'user_group_name', 'group_title', 'is_processed'
+                    ]
+
+                    # 检查字段数量与名称是否兼容
+                    if len(column_names) != len(expected_columns) or set(column_names) != set(expected_columns):
+                        logger.warning("[SimpleTimeTask] Database schema is incompatible. Dropping and recreating the tasks table.")
+                        cursor.execute("DROP TABLE tasks;")
+
+                # 创建数据表（如果不存在）
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id TEXT PRIMARY KEY,
+                        time TEXT NOT NULL,
+                        frequency TEXT CHECK(frequency IN ('once', 'work_day', 'every_day')),
+                        content TEXT NOT NULL,
+                        target_type INTEGER DEFAULT 0,
+                        user_id TEXT,
+                        user_name TEXT,
+                        user_group_name TEXT,
+                        group_title TEXT,
+                        is_processed INTEGER DEFAULT 0
+                    )
+                ''')
+
+                # 从数据库中加载当前的任务
+                cursor.execute('SELECT * FROM tasks')
+                # 读取所有任务行
+                rows = cursor.fetchall()
+                logger.info(f"[SimpleTimeTask] Loaded tasks from database: {rows}")
+
+                # 创建 Task 对象并添加到 self.tasks 列表
+                for row in rows:
+                    task = Task(
+                        task_id=row[0],
+                        time_value=row[1],
+                        frequency=row[2],
+                        content=row[3],
+                        target_type=row[4],
+                        user_id=row[5],
+                        user_name=row[6],
+                        user_group_name=row[7],
+                        group_title=row[8],
+                        is_processed=row[9]
+                    )
+                    # 添加 Task 实例到 self.tasks 列表
+                    self.tasks.append(task)
 
     def find_user_name_by_user_id(self, msg, user_id):
         """查找指定 UserName 的昵称"""

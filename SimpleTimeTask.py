@@ -457,35 +457,46 @@ class SimpleTimeTask(Plugin):
             content_dict["msg"] = msg
             context = Context(ContextType.TEXT, content, content_dict)
 
+            # reply默认值
+            reply_text = f"[SimpleTimeTask]\n--定时提醒任务--\n{content}"
+            replyType = ReplyType.TEXT
+
             # 以下部分保持不变
             if "GPT" in content:
                 content = content.replace("GPT", "")
                 reply: Reply = Bridge().fetch_reply_content(content, context)
-                reply_text = reply.content
-                replyType = reply.type
+
+                # 检查reply是否有效
+                if reply and reply.type:
+                    # 替换reply类型和内容
+                    reply_text = reply.content
+                    replyType = reply.type
             else:
                 e_context = None
+                # 初始化插件上下文
                 channel = WechatChannel()
                 channel.channel_type = "wx"
                 content_dict["content"] = content
                 context.__setitem__("content", content)
                 logger.info(f"[SimpleTimeTask] content: {content}")
                 try:
+                    # 获取插件回复
                     e_context = PluginManager().emit_event(
                         EventContext(Event.ON_HANDLE_CONTEXT, {"channel": channel, "context": context, "reply": Reply()})
                     )
                 except Exception as e:
                     logger.info(f"路由插件异常！将使用原消息回复。错误信息：{e}")
 
-                if e_context:
+                # 如果插件回复为空，则使用原消息回复
+                if e_context and e_context["reply"]:
                     reply = e_context["reply"]
+                    # 检查reply是否有效
                     if reply and reply.type:
+                        # 替换reply类型和内容
                         reply_text = reply.content
                         replyType = reply.type
-                else:
-                    reply_text = f"[SimpleTimeTask]\n--定时提醒任务--\n{content}"
-                    replyType = ReplyType.TEXT
 
+            # 构建回复
             reply = Reply()
             reply.type = replyType
             reply.content = reply_text

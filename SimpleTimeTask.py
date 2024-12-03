@@ -546,6 +546,23 @@ class SimpleTimeTask(Plugin):
             else:
                 logger.error(f"[SimpleTimeTask] 发送消息失败，重试次数达到上限: {e}")
 
+    def detect_time_command(self, text):
+        # 判断输入是否为空
+        if not text:
+            return None
+
+        # 查找/time在文本中的位置
+        time_index = text.find('/time')
+
+        # 如果找到，就返回包含/time之后的文本
+        if time_index != -1:
+            result = text[time_index:]
+            # 包含/time及后面的内容
+            return result
+        else:
+            # 如果没有找到，返回None
+            return None
+
     def on_handle_context(self, e_context: EventContext):
         """ 处理用户指令 """
         # 检查消息类型
@@ -579,13 +596,13 @@ class SimpleTimeTask(Plugin):
         self.user_last_processed_time[user_id] = current_time
 
         # 获取用户指令
-        command = msg.content.strip()
-        logger.info(f"[SimpleTimeTask] Command received: {command}")
-        # 初始化回复字符串
-        reply_str = ''
+        command = self.detect_time_command(msg.content.strip())
+        logger.debug(f"[SimpleTimeTask] Command received: {command}")
 
-        # 解析用户指令
-        if command.startswith('/time'):
+        # 检查指令是否有效
+        if command is not None:
+            # 初始化回复字符串
+            reply_str = ''
             # 检查是否为群消息
             if msg.is_group:
                 # 获取群昵称
@@ -594,7 +611,7 @@ class SimpleTimeTask(Plugin):
             else:
                 # 获取用户昵称
                 user_name = msg.from_user_nickname
-            logger.debug(f"[SimpleTimeTask] 收到来自[{user_name}|{user_group_name}|{user_id}]的消息: {command}")
+            logger.info(f"[SimpleTimeTask] 收到来自[{user_name}|{user_group_name}|{user_id}]的指令: {command}")
 
             # 解析指令
             command_args = command.split(' ')

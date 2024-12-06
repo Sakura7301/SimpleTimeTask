@@ -331,9 +331,6 @@ class SimpleTimeTask(Plugin):
                         if task_time != now or task.is_processed == 1:
                             continue
 
-                    # 触发任务
-                    self.run_task_in_thread(task)
-
                     # 任务触发后处理
                     if task.frequency == "once":
                         # 从内存中移除
@@ -345,6 +342,9 @@ class SimpleTimeTask(Plugin):
                         task.is_processed =  1
                         # 更新数据库中的状态
                         self.update_processed_status_in_db(task.task_id, 1)
+
+                    # 触发任务
+                    self.run_task_in_thread(task)
 
                 except ValueError as e:
                     logger.error(f"[SimpleTimeTask] Time format error for task ID {task.task_id}: {e}")

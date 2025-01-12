@@ -28,7 +28,7 @@ from plugins.SimpleTimeTask.Task import Task
     desire_priority=100,
     hidden=False,
     desc="一个简易的定时器",
-    version="1.0",
+    version="1.0.1",
     author="Sakura7301",
 )
 class SimpleTimeTask(Plugin):
@@ -1095,5 +1095,5 @@ class SimpleTimeTask(Plugin):
 
     def get_help_text(self, **kwargs):
         """获取帮助文本"""
-        help_text = "- [任务列表]：/time 任务列表\n- [取消任务]：/time 取消任务 任务ID\n- [添加任务]：/time <freq> <time> <GPT> <content> <group>\n\n   示例：/time 今天 17:00 提醒喝水\n   示例：/time 今天 17:00 GPT 提醒喝水\n   示例：/time 每周日 08:00 GPT 提醒我逛超市\n   示例：/time 不含周日 08:55 摸鱼\n   示例：/time 每月10号 17:00 GPT 提醒我存钱\n   示例：/time 今天 17:00 提醒喝水\n   示例：/time 今天 17:00 GPT 提醒喝水 group[群标题]\n\n注意：如果本月没有指定的日期，任务会在本月的最后一天触发。"
+        help_text = "- [任务列表]：/time 任务列表\n- [取消任务]：/time 取消任务 任务ID\n- [添加任务]：/time <freq> <time> <GPT> <content> <group>\n\n示例：\n    /time 今天 17:00 提醒喝水\n    /time 今天 17:00 GPT 提醒喝水\n    /time 每周日 08:00 GPT 提醒我逛超市\n    /time 不含周日 08:55 摸鱼\n    /time 每月10号 17:00 GPT 提醒我存钱\n    /time 今天 17:00 提醒喝水\n    /time 今天 17:00 GPT 提醒喝水 group[群标题]\n\n注意：设定每月固定日期触发时，如果本月没有指定的日期，任务会默认在当月的最后一天触发。"
         return help_text

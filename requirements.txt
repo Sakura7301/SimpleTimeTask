@@ -1,5 +1,3 @@
 # requirements.txt  
-threading  # 多线程处理（Python内置，通常不需要）  
-random     # 随机数生成（Python内置，通常不需要）  
-sqlite3    # SQLite数据库（Python内置，通常不需要）  
-typing     # Python内置模块（Python 3.5 及以后的版本无需单独安装）  
+itchat=1.3.10
+wcwidth=0.2.13

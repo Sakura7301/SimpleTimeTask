@@ -3,6 +3,10 @@
 ## 简介
 **SimpleTimeTask** 是一个基于 chatgpt-on-wechat 的插件，用于触发定时任务，感谢[timetask](https://github.com/haikerapples/timetask)项目提供的帮助，部分实现参考于此。
 
+## 更新日志
+- 2025.1.12：新增多种任务频率，如：每周一，不含周日，每月1号，详见帮助文档。
+
+
 ## 安装
 - 方法一：
   - 载的插件文件都解压到`plugins`文件夹的一个单独的文件夹，最终插件的代码都位于`plugins/PLUGIN_NAME/*`中。启动程序后，如果插件的目录结构正确，插件会自动被扫描加载。除此以外，注意你还需要安装文件夹中`requirements.txt`中的依赖。

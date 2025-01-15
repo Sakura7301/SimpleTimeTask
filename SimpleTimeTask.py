@@ -37,6 +37,8 @@ class SimpleTimeTask(Plugin):
         try:
             self.config = super().load_config()
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
+            # 线程名
+            self.daemon_name = "SimpleTimeTask_daemon"
             # 定义数据库路径
             self.DB_FILE_PATH = "plugins/SimpleTimeTask/simple_time_task.db"
             # 创建数据库锁
@@ -48,8 +50,10 @@ class SimpleTimeTask(Plugin):
             self.last_reset_task_date = "1970-01-01"
             # 防抖动字典
             self.user_last_processed_time = {}
+            # 检查线程是否关闭
+            self.check_daemon()
             # 启动任务检查线程
-            self.check_thread = threading.Thread(target=self.check_and_trigger_tasks)
+            self.check_thread = threading.Thread(target=self.check_and_trigger_tasks, name=self.daemon_name)
             self.check_thread.daemon = True
             self.check_thread.start()
             # 初始化完成
@@ -58,6 +62,20 @@ class SimpleTimeTask(Plugin):
         except Exception as e:
             logger.error(f"[SimpleTimeTask] initialization error: {e}")
             raise "[SimpleTimeTask] init failed, ignore "
+
+    def check_daemon(self):
+        target_thread = None
+        for thread in threading.enumerate():  # 获取所有活动线程
+            if thread.name == self.daemon_name:
+                # 找到同名线程
+                target_thread = thread
+                break
+        # 回收线程
+        if target_thread:
+            # 关闭线程
+            target_thread._stop()
+        # 没有找到同名线程
+        return None
 
     def init_db_and_load_tasks(self):
         """ 初始化数据库，创建任务表并加载现有任务 """

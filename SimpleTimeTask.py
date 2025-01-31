@@ -477,13 +477,13 @@ class SimpleTimeTask(Plugin):
             return False
         elif expected_day == current_day:
             # 达到约定日期，返回True，准备触发
-            logger.info(f"[SimpleTimeTask] trigger month_task frequency: {frequency}")
+            logger.debug(f"[SimpleTimeTask] trigger month_task frequency: {frequency}")
             return True
         else:
             # 约定日期大于本月最后一天(如设定为31号，但是本月最多只到30号)
             if current_day == total_days:
                 # 今天已经是本月的最后一天，触发。
-                logger.info(f"[SimpleTimeTask] expected day({expected_day}) is not in this month, today is the last day, now trigger it!")
+                logger.debug(f"[SimpleTimeTask] expected day({expected_day}) is not in this month, today is the last day, now trigger it!")
                 return True
             else:
                 return False

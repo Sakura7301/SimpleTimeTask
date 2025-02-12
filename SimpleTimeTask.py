@@ -11,6 +11,7 @@ import datetime
 import threading
 from plugins import *
 from lib import itchat
+from config import conf
 import config as RobotConfig
 from common.log import logger
 from bridge.bridge import Bridge
@@ -37,6 +38,12 @@ class SimpleTimeTask(Plugin):
         try:
             self.config = super().load_config()
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
+            self.chatrooms = {}
+            # 获取协议类型
+            self.channel_type = conf().get("channel_type")
+            if self.channel_type == "gewechat":
+                # 设置群映射关系
+                self.get_group_map()
             # 线程名
             self.daemon_name = "SimpleTimeTask_daemon"
             # 定义数据库路径
@@ -62,6 +69,33 @@ class SimpleTimeTask(Plugin):
         except Exception as e:
             logger.error(f"[SimpleTimeTask] initialization error: {e}")
             raise "[SimpleTimeTask] init failed, ignore "
+
+    def get_group_map(self):
+        from lib.gewechat.client import GewechatClient
+        try:
+            self.gewe_base_url = conf().get("gewechat_base_url")
+            self.gewe_token = conf().get("gewechat_token")
+            self.gewe_app_id = conf().get("gewechat_app_id")
+            self.gewe_client = GewechatClient(self.gewe_base_url, self.gewe_token)
+
+            # 获取通讯录列表
+            result = self.gewe_client.fetch_contacts_list(self.gewe_app_id)
+            if result and result['ret'] == 200:
+                chatrooms = result['data']['chatrooms']
+                brief_info = self.gewe_client.get_brief_info(self.gewe_app_id, chatrooms)
+                logger.info(f"[SimpleTimeTask] 群聊简要信息: \n{brief_info}")
+                if brief_info and brief_info['ret'] == 200:
+                    self.chatrooms = brief_info['data']
+                else:
+                        logger.error(f"[SimpleTimeTask] 获取群聊标题映射失败! group_id: {chatrooms}")
+                logger.debug(f"[SimpleTimeTask] 群聊映射关系: \n{self.chatrooms}")
+            else:
+                error_info = None
+                if result:
+                    error_info = f"ret: {result['ret']} msg: {result['msg']}"
+                logger.error(f"[SimpleTimeTask] 获取WX通讯录列表失败! {error_info}")
+        except Exception as e:
+            logger.error(f"[SimpleTimeTask] 设置群聊映射关系失败! {e}")
 
     def check_daemon(self):
         target_thread = None
@@ -316,17 +350,27 @@ class SimpleTimeTask(Plugin):
         return user_name
 
     def get_group_id(self, group_title):
-        # 获取群聊ID
-        chatrooms = itchat.get_chatrooms()
         tempRoomId = None
-        # 获取群聊
-        for chat_room in chatrooms:
-            # 根据群聊名称匹配群聊ID
-            userName = chat_room["UserName"]
-            NickName = chat_room["NickName"]
-            if NickName == group_title:
-                tempRoomId = userName
-                break
+        if self.channel_type == "gewechat":
+            # 获取群聊
+            for chat_room in self.chatrooms:
+                # 根据群聊名称匹配群聊ID
+                userName = chat_room["userName"]
+                NickName = chat_room["nickName"]
+                if NickName == group_title:
+                    tempRoomId = userName
+                    break
+        else:
+            # 获取群聊ID
+            chatrooms = itchat.get_chatrooms()
+            # 获取群聊
+            for chat_room in chatrooms:
+                # 根据群聊名称匹配群聊ID
+                userName = chat_room["UserName"]
+                NickName = chat_room["NickName"]
+                if NickName == group_title:
+                    tempRoomId = userName
+                    break
         return tempRoomId
 
     def has_frequency_check_constraint(self):
@@ -893,6 +937,9 @@ class SimpleTimeTask(Plugin):
             if task.target_type == 1:
                 is_group = True
                 receiver = self.get_group_id(task.group_title)
+                if receiver is None:
+                    # 未获取到群id，跳过此次任务处理
+                    return
                 is_group_str = "群组消息"
             else:
                 receiver = task.user_id
@@ -1045,13 +1092,17 @@ class SimpleTimeTask(Plugin):
         user_group_name = None
         # 获取用户ID
         msg = e_context['context']['msg']
-        # 检查是否为群消息
-        if msg.is_group:
-            # 群消息，获取真实ID
-            user_id = msg._rawmsg['ActualUserName']
+        if self.channel_type == "gewechat":
+            # gewe协议无需区分真实ID
+            user_id = msg.actual_user_id
         else:
-            # 私聊消息，获取用户ID
-            user_id = msg.from_user_id
+            # 检查是否为群消息
+            if msg.is_group:
+                # 群消息，获取真实ID
+                user_id = msg._rawmsg['ActualUserName']
+            else:
+                # 私聊消息，获取用户ID
+                user_id = msg.from_user_id
 
         # 获取当前时间（以毫秒为单位）
         current_time = time.monotonic() * 1000  # 转换为毫秒
@@ -1073,14 +1124,20 @@ class SimpleTimeTask(Plugin):
         if command is not None:
             # 初始化回复字符串
             reply_str = ''
-            # 检查是否为群消息
-            if msg.is_group:
-                # 获取群昵称
-                user_name = self.find_user_name_by_user_id(msg._rawmsg, user_id)
-                user_group_name = msg.actual_user_nickname
+            if self.channel_type == "gewechat":
+                # gewe协议获取群名
+                user_name = msg.actual_user_nickname
+                if msg.is_group:
+                    user_group_name = msg.other_user_nickname
             else:
-                # 获取用户昵称
-                user_name = msg.from_user_nickname
+                # 检查是否为群消息
+                if msg.is_group:
+                        # itchat协议获取群名
+                        user_name = self.find_user_name_by_user_id(msg._rawmsg, user_id)
+                        user_group_name = msg.actual_user_nickname
+                else:
+                    # 获取用户昵称
+                    user_name = msg.from_user_nickname
             logger.info(f"[SimpleTimeTask] 收到来自[{user_name}|{user_group_name}|{user_id}]的指令: {command}")
 
             # 解析指令
